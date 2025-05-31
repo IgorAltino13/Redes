@@ -102,10 +102,10 @@ int main(int argc, char **argv){
         GameMessage msg; // Estrutura para mensagens do protocolo
         int client_wins = 0, server_wins = 0;
 
-        // Define a semente do gerador de números aleatórios (DICA: mover para fora do while(1))
+        // Define a semente do gerador de números aleatórios
         srand(time(NULL));
 
-        // Loop da partida (permanece até o cliente encerrar)
+        // Loop da partida 
         while(1){
             // Envia uma solicitação de jogada para o cliente
             memset(&msg, 0, sizeof(msg));
