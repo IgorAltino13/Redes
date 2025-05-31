@@ -3,85 +3,105 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
 
+#define BUFSZ 1024  // Tamanho máximo do buffer de mensagens
 
-
-//recebe como parametro o ip do servidor e o porto
+// Exibe o modo correto de uso do cliente
 void usage(int argc, char **argv){
-    printf("usage: %s <server IP> <server port>",argv[0]);
-    printf("example: %s 127.0.0.1 51511",argv[0]);
+    printf("usage: %s <server IP> <server port>\n", argv[0]);
     exit(EXIT_FAILURE);
 }
 
-#define BUFSZ 1024
+// Função com validação para ler um número inteiro do usuário
+int ler_inteiro_seguro(const char *prompt, int *valor) {
+    char input[BUFSZ];
+    printf("%s", prompt);
+    if (fgets(input, sizeof(input), stdin) == NULL)
+        return 0; // erro ao ler
+    return sscanf(input, "%d", valor) == 1; // retorna 1 se conseguiu ler um número inteiro
+}
 
 int main(int argc, char **argv){
-    //verificação se a pessoa chamou o programa certo
     if(argc < 3){
-        usage(argc, argv);
+        usage(argc, argv); // exige IP e porta como argumentos
     }
+
     struct sockaddr_storage storage;
-    //argv[1] = endereço recebido do servido, argv[2] = port
-    if(0 != addrparse(argv[1],argv[2], &storage)){
-        usage(argc,argv);
+    // Converte os argumentos em um endereço de socket
+    if(0 != addrparse(argv[1], argv[2], &storage)){
+        usage(argc, argv); // erro na conversão
     }
-    //criação do socket
-    int s;
-    //socket da internet e tcp
-    s = socket(storage.ss_family, SOCK_STREAM, 0);
-    //verificação de erros(problemas no dispositivo remoto e com isso nao comunica...)
-    //toda vez que dá erro socket retorna -1
+
+    // Criação do socket TCP
+    int s = socket(storage.ss_family, SOCK_STREAM, 0);
     if(s == -1){
-        //função para imprimir a mensagem de erro e sair
-        logexit("socket");
+        logexit("socket"); // erro na criação do socket
     }
-    
-    
+
+    // Conecta ao servidor
     struct sockaddr *addr = (struct sockaddr *)(&storage);
-    //função connect
-    //se retornar valor diferente de 0 é que houve algum erro
-    //para a função conect temos que passar o socket, o endereço e o tamanho do endereço
     if(0 != connect(s, addr, sizeof(storage))){
-        logexit("connect");
+        logexit("connect"); // erro ao conectar
     }
-    //Criação do vetor de endereço do servidor
+
+    // Converte o endereço do servidor em string para exibição
     char addrstr[BUFSZ];
-    addrtostr(addr,addrstr, BUFSZ);
-    printf("connected to %s\n",addrstr);
-    //vetor de mensagem
-    char buf[BUFSZ];
-    //inicialização do buffer com 0
-    memset(buf, 0, BUFSZ);
-    printf("mensagem> ");
-    fgets(buf,BUFSZ-1, stdin);
-    //envio do dado para o servidor
-    //fala o numero de bytes que mandamos transmitir
-    size_t count = send(s, buf, strlen(buf)+1,0);
-    // se numero de bytes transmitidos na rede != do tamanho de buf deu erro
-    if(count != strlen(buf)+1){
-        logexit("send");
-    }
-    memset(buf, 0, BUFSZ);
-    unsigned total = 0;
-    //para ficarmos recebendo dados do servidor
+    addrtostr(addr, addrstr, BUFSZ);
+    printf("Conectado ao servidor: %s\n", addrstr);
+
+    GameMessage msg; // estrutura de mensagem compartilhada com o servidor
+
     while(1){
-        //recepção do dado(resposta enviada) pelo servidor
-        //o dado irá chegar no socket s e irá ser armazenado no buf e o tanto de dado que irei receber é ate BUFSZ
-        //importante notar que a variavel total foi adicionada pois o servidor nao manda o dado todo de uma vez 
-        count = recv(s, buf + total, BUFSZ - total, 0);
-        //significa que não recebemos nada, logo a conexao está fechada
-        if(count == 0){
-            //conexao terminada
-            break;
+        // Aguarda mensagem do servidor
+        recv(s, &msg, sizeof(msg), 0);
+
+        // Solicitação de jogada do servidor
+        if(msg.type == MSG_REQUEST){
+            int opcao;
+            // Laço até o usuário digitar uma entrada válida
+            while (!ler_inteiro_seguro("\nEscolha sua jogada:\n"
+                                       "0 - Nuclear Attack\n"
+                                       "1 - Intercept Attack\n"
+                                       "2 - Cyber Attack\n"
+                                       "3 - Drone Strike\n"
+                                       "4 - Bio Attack\n> ", &opcao)) {
+                printf("[Erro] Entrada inválida. Digite um número entre 0 e 4.\n");
+            }
+
+            // Envia a jogada para o servidor
+            msg.type = MSG_RESPONSE;
+            msg.client_action = opcao;
+            send(s, &msg, sizeof(msg), 0);
         }
-        total += count;
+        // Resultado da rodada enviado pelo servidor
+        else if(msg.type == MSG_RESULT){
+            printf("%s\n", msg.message); // exibe resultado: vitória, derrota ou empate
+        }
+        // Servidor pergunta se o cliente quer jogar novamente
+        else if(msg.type == MSG_PLAY_AGAIN_REQUEST){
+            int novamente;
+            while (!ler_inteiro_seguro("\nDeseja jogar novamente?\n1 - Sim\n0 - Não\n> ", &novamente)) {
+                printf("[Erro] Entrada inválida. Digite 0 ou 1.\n");
+            }
+
+            msg.type = MSG_PLAY_AGAIN_RESPONSE;
+            msg.result = novamente;
+            send(s, &msg, sizeof(msg), 0); // envia decisão ao servidor
+        }
+        // Servidor detecta erro na entrada
+        else if(msg.type == MSG_ERROR){
+            printf("[Erro] %s\n", msg.message); // exibe mensagem de erro do servidor
+        }
+        // Fim do jogo
+        else if(msg.type == MSG_END){
+            printf("%s\n", msg.message); // exibe placar final
+            break; // encerra o loop
+        }
     }
-    close(s);
-    printf("received %u bytes\n",total);
-    puts(buf);
-    exit(EXIT_SUCCESS);
+
+    close(s); // fecha o socket
+    return 0;
 }
