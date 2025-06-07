@@ -7,101 +7,106 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 
-#define BUFSZ 1024  // Tamanho máximo do buffer de mensagens
 
-// Exibe o modo correto de uso do cliente
+// Função que exibe o uso correto do programa e encerra a execução
+//recebe como parametro o ip do servidor e o porto
 void usage(int argc, char **argv){
-    printf("usage: %s <server IP> <server port>\n", argv[0]);
+    printf("usage: %s <server IP> <server port>",argv[0]);
+    printf("example: %s 127.0.0.1 51511",argv[0]);
     exit(EXIT_FAILURE);
 }
 
-// Função com validação para ler um número inteiro do usuário
-int ler_inteiro_seguro(const char *prompt, int *valor) {
-    char input[BUFSZ];
-    printf("%s", prompt);
-    if (fgets(input, sizeof(input), stdin) == NULL)
-        return 0; // erro ao ler
-    return sscanf(input, "%d", valor) == 1; // retorna 1 se conseguiu ler um número inteiro
-}
+#define BUFSZ 1024
+
+
+
 
 int main(int argc, char **argv){
+    //verificação se a pessoa chamou o programa certo
     if(argc < 3){
-        usage(argc, argv); // exige IP e porta como argumentos
+        usage(argc, argv);
     }
-
+    // Armazena o endereço do servidor (IPv4 ou IPv6)
     struct sockaddr_storage storage;
-    // Converte os argumentos em um endereço de socket
-    if(0 != addrparse(argv[1], argv[2], &storage)){
-        usage(argc, argv); // erro na conversão
+    // Converte o IP e a porta passados como argumento para estrutura de endereço
+    if(0 != addrparse(argv[1],argv[2], &storage)){
+        usage(argc,argv);
     }
+    //criação do socket
+    int s;
+    s = socket(storage.ss_family, SOCK_STREAM, 0);
 
-    // Criação do socket TCP
-    int s = socket(storage.ss_family, SOCK_STREAM, 0);
     if(s == -1){
-        logexit("socket"); // erro na criação do socket
+        // Encerra se a criação do socket falhar
+        logexit("socket");
     }
-
-    // Conecta ao servidor
+    
+    // Faz o cast da estrutura para o tipo esperado pela função connect
     struct sockaddr *addr = (struct sockaddr *)(&storage);
+    // Tenta estabelecer conexão com o servidor
     if(0 != connect(s, addr, sizeof(storage))){
-        logexit("connect"); // erro ao conectar
+        // Encerra se a conexão falhar
+        logexit("connect");
     }
 
-    // Converte o endereço do servidor em string para exibição
+    // Converte o endereço binário do servidor para string e imprime a conexão
     char addrstr[BUFSZ];
-    addrtostr(addr, addrstr, BUFSZ);
-    printf("Conectado ao servidor: %s\n", addrstr);
+    addrtostr(addr,addrstr, BUFSZ);
+    printf("Conectado ao servidor.\n");
 
-    GameMessage msg; // estrutura de mensagem compartilhada com o servidor
+    
+   // Declaração da estrutura de mensagem usada no protocolo do jogo
+   GameMessage msg;
+   // Variavel auxiliar que armazena a jogada escolhida pelo cliente
+   int opção = 0;
+   // Variavel auxiliar que armazena se cliente quer jogar novamente
+   int novamente = 0;
 
+   // Loop principal de comunicação com o servidor
     while(1){
-        // Aguarda mensagem do servidor
-        recv(s, &msg, sizeof(msg), 0);
-
-        // Solicitação de jogada do servidor
-        if(msg.type == MSG_REQUEST){
-            int opcao;
-            // Laço até o usuário digitar uma entrada válida
-            while (!ler_inteiro_seguro("\nEscolha sua jogada:\n"
-                                       "0 - Nuclear Attack\n"
-                                       "1 - Intercept Attack\n"
-                                       "2 - Cyber Attack\n"
-                                       "3 - Drone Strike\n"
-                                       "4 - Bio Attack\n> ", &opcao)) {
-                printf("[Erro] Entrada inválida. Digite um número entre 0 e 4.\n");
-            }
-
-            // Envia a jogada para o servidor
+        // Recebe mensagem do servidor
+        size_t count = recv(s, &msg, sizeof(msg), 0);
+        
+        //Mostra as jogadas disponiveis
+        if(msg.type == 0){
+            printf("%s",msg.message);
             msg.type = MSG_RESPONSE;
-            msg.client_action = opcao;
-            send(s, &msg, sizeof(msg), 0);
+            //leitura da opção escolhida pelo cliente
+            scanf("%d",&opção);
+            msg.client_action = opção;
+            //envio da escolha
+            send(s,&msg,sizeof(msg),0);
         }
-        // Resultado da rodada enviado pelo servidor
-        else if(msg.type == MSG_RESULT){
-            printf("%s\n", msg.message); // exibe resultado: vitória, derrota ou empate
+        else if(msg.type == 2){
+            //print das açoes dos jogadores e do resultado atual
+            printf("%s",msg.message);
         }
-        // Servidor pergunta se o cliente quer jogar novamente
-        else if(msg.type == MSG_PLAY_AGAIN_REQUEST){
-            int novamente;
-            while (!ler_inteiro_seguro("\nDeseja jogar novamente?\n1 - Sim\n0 - Não\n> ", &novamente)) {
-                printf("[Erro] Entrada inválida. Digite 0 ou 1.\n");
-            }
-
+        //verifica se quer jogar novamente
+        else if(msg.type == 3){
+            printf("%s\n",msg.message);
+            scanf("%d",&novamente);
             msg.type = MSG_PLAY_AGAIN_RESPONSE;
-            msg.result = novamente;
-            send(s, &msg, sizeof(msg), 0); // envia decisão ao servidor
+            msg.client_action = novamente;
+            send(s,&msg,sizeof(msg),0);
+            
         }
-        // Servidor detecta erro na entrada
-        else if(msg.type == MSG_ERROR){
-            printf("[Erro] %s\n", msg.message); // exibe mensagem de erro do servidor
+        //Exibe a mensagem de erro
+        else if(msg.type == 5){
+            printf("%s",msg.message);
         }
-        // Fim do jogo
-        else if(msg.type == MSG_END){
-            printf("%s\n", msg.message); // exibe placar final
-            break; // encerra o loop
+        //exibe a mensagem final(Resultado final da partida )
+        else if(msg.type == 6){
+            printf("%s\n",msg.message);
+            break;
         }
+        
+        if(count == 0){
+            //conexao terminada
+            break;
+        }
+        
     }
-
-    close(s); // fecha o socket
-    return 0;
+    //Fecha o socket
+    close(s);
+    exit(EXIT_SUCCESS);
 }

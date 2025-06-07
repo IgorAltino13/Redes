@@ -5,7 +5,7 @@
 
 
 #define MSG_SIZE 256
-
+//enum de MessageType
 typedef enum {
     MSG_REQUEST,
     MSG_RESPONSE,
@@ -16,6 +16,7 @@ typedef enum {
     MSG_END
 } MessageType;
 
+//Estrutura disponibilizada
 typedef struct {
     int type;                // Tipo da mensagem
     int client_action;      // Ação escolhida pelo cliente
@@ -25,6 +26,7 @@ typedef struct {
     int server_wins;        // Vitórias do servidor
     char message[MSG_SIZE]; // Mensagem textual
 } GameMessage;
+
 
 
 void logexit(const char *msg);
